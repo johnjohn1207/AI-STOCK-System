@@ -12,6 +12,9 @@
 
 ## 🏗️ 系統架構與技術棧 (Architecture & Tech Stack)
 
+### 🗺️ 系統架構圖 (System Architecture)
+
+```mermaid
 graph LR
     %% 外部依賴
     YF[Yahoo Finance API] -->|即時/歷史報價| ETL[data_loader.py <br> ETL & 增量更新]
@@ -53,6 +56,8 @@ graph TD
     J --> K
     E --> K
     I --> K
+
+---
 
 本系統嚴格遵守「關注點分離 (Separation of Concerns)」原則，分為三大層：
 
