@@ -39,7 +39,11 @@ graph LR
     
     style Daily fill:#f9f,stroke:#333,stroke-width:2px
     style DB fill:#e6f3ff,stroke:#333,stroke-width:2px
+```
 
+### ⚙️ 自動排程交易邏輯 (Trading Logic Flow)
+
+```mermaid
 graph TD
     A[每日排程啟動 Daily Trader] --> B{檢查最新資料與模型訊號}
     B -- 買進 (BUY) --> C[查詢 DB 可用資金餘額]
@@ -56,6 +60,7 @@ graph TD
     J --> K
     E --> K
     I --> K
+```
 
 ---
 
@@ -83,16 +88,25 @@ graph TD
 ```bash
 # 安裝依賴套件
 pip install -r requirements.txt
-2. 啟動前端展示介面 (Backtest UI)
-Bash
+```
+
+### 2. 啟動前端展示介面 (Backtest UI)
+```bash
 streamlit run app.py
-3. 執行單元測試 (Unit Testing)
-Bash
+```
+
+### 3. 執行單元測試 (Unit Testing)
+```bash
 pytest unit_test.py
-📂 專案結構 (Project Structure)
-├── app.py # Streamlit 前端主程式
-├── data_loader.py # ETL 與資料庫介接模組
-├── model_core.py # 深度學習模型與特徵工程
-├── backtest_core.py # 回測引擎與績效結算模組
-├── daily_trader.py # 模擬實盤自動化下單腳本
-└── unit_test.py # Pytest 單元測試腳本
+```
+
+## 📂 專案結構 (Project Structure)
+```text
+├── app.py               # Streamlit 前端主程式
+├── data_loader.py       # ETL 與資料庫介接模組
+├── model_core.py        # 深度學習模型與特徵工程
+├── backtest_core.py     # 回測引擎與績效結算模組
+├── daily_trader.py      # 模擬實盤自動化下單腳本
+├── requirements.txt     # 專案依賴套件清單
+└── unit_test.py         # Pytest 單元測試腳本
+```
