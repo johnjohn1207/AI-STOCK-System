@@ -24,6 +24,11 @@ type BacktestResult = {
   dates: string[];
   prices: number[];
   equity_curve: number[];
+  signals: boolean[];
+  predicted_returns: number[];
+  prediction_dates: string[];
+  model: string;
+  lookBack: number;
   metrics: {
     totalReturn: number;
     winRate: number;
@@ -42,6 +47,7 @@ export default function Home() {
   const [capital, setCapital] = useState(100000);
   const [stopLoss, setStopLoss] = useState(5);
   const [takeProfit, setTakeProfit] = useState(15);
+  const [epochs, setEpochs] = useState(30);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -62,13 +68,16 @@ export default function Home() {
       const sells = result.trades.filter(
         (trade) => trade.date === date && (trade.action.includes("SELL") || trade.action.includes("STOP") || trade.action.includes("TAKE")),
       );
-      return {
-        date,
-        price: result.prices[index],
-        buy: buys[0]?.price ?? null,
-        sell: sells[0]?.price ?? null,
-      };
+      return { date, price: result.prices[index], buy: buys[0]?.price ?? null, sell: sells[0]?.price ?? null };
     });
+  }, [result]);
+
+  const predictionData = useMemo(() => {
+    if (!result) return [];
+    return result.prediction_dates.map((date, index) => ({
+      date,
+      predictedReturn: result.predicted_returns[index] * 100,
+    }));
   }, [result]);
 
   async function runBacktest() {
@@ -85,6 +94,7 @@ export default function Home() {
           initial_capital: capital,
           stop_loss: stopLoss / 100,
           take_profit: takeProfit / 100,
+          train_epochs: epochs,
         }),
       });
       const data = await response.json();
@@ -103,9 +113,9 @@ export default function Home() {
         <div>
           <div className="eyebrow">AI QUANT · NEXT.JS</div>
           <h1>📈 AI-Driven 雙因子量化回測系統</h1>
-          <p>結合 LSTM、PostgreSQL 與互動式市場分析，將原 Streamlit Dashboard 升級成現代化 Web App。</p>
+          <p>現在已接入 PyTorch LSTM：預測報酬率 → MA20 / 成交量因子 → 回測。</p>
         </div>
-        <div className="status">● API Ready</div>
+        <div className="status">● LSTM API Ready</div>
       </header>
 
       <section className="workspace">
@@ -119,36 +129,50 @@ export default function Home() {
           <label>初始本金<input type="number" min={10000} step={10000} value={capital} onChange={(e) => setCapital(Number(e.target.value))} /></label>
           <label>停損：{stopLoss}%<input type="range" min={1} max={20} value={stopLoss} onChange={(e) => setStopLoss(Number(e.target.value))} /></label>
           <label>停利：{takeProfit}%<input type="range" min={1} max={50} value={takeProfit} onChange={(e) => setTakeProfit(Number(e.target.value))} /></label>
-          <button onClick={runBacktest} disabled={loading}>{loading ? "⏳ 執行中..." : "🚀 執行全端系統回測"}</button>
+          <label>LSTM 訓練 Epoch：{epochs}<input type="range" min={1} max={100} value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} /></label>
+          <small className="muted">Look-back 固定 60 日；特徵：Return / Close / Volume / RSI</small>
+          <button onClick={runBacktest} disabled={loading}>{loading ? "⏳ LSTM 訓練與回測中..." : "🚀 執行 LSTM 全端回測"}</button>
           {error && <div className="error">❌ {error}</div>}
         </aside>
 
         <section className="content">
           {!result && !loading && (
-            <div className="empty panel"><div className="empty-icon">📊</div><h2>準備開始回測</h2><p>設定左側參數後，執行回測即可查看策略績效、資金曲線與交易明細。</p></div>
+            <div className="empty panel"><div className="empty-icon">🤖</div><h2>準備啟動 LSTM</h2><p>設定參數後，後端會訓練 PyTorch LSTM，產生預測報酬率，再通過雙因子濾網執行回測。</p></div>
           )}
 
-          {loading && <div className="empty panel"><div className="spinner" /><h2>正在執行 AI 回測...</h2><p>正在查詢 PostgreSQL 並計算策略績效。</p></div>}
+          {loading && <div className="empty panel"><div className="spinner" /><h2>正在訓練 LSTM...</h2><p>正在查詢 PostgreSQL、建立 60 日序列、訓練模型並執行 walk-forward backtest。</p></div>}
 
           {result && !loading && (
             <>
               <div className="kpis">
+                <Metric title="模型" value={`${result.model} · ${result.lookBack}D`} />
                 <Metric title="總報酬率" value={`${result.metrics.totalReturn.toFixed(2)}%`} />
                 <Metric title="勝率" value={`${result.metrics.winRate.toFixed(2)}%`} />
-                <Metric title="最大回撤 (MDD)" value={`${result.metrics.maxDrawdown.toFixed(2)}%`} />
-                <Metric title="夏普值 (Sharpe)" value={result.metrics.sharpe.toFixed(2)} />
+                <Metric title="Sharpe" value={result.metrics.sharpe.toFixed(2)} />
               </div>
 
-              <ChartCard title="💰 累積淨值走勢（AI 策略 vs Benchmark）">
+              <ChartCard title="💰 累積淨值走勢（LSTM 雙因子 vs Benchmark）">
                 <ResponsiveContainer width="100%" height={340}>
                   <LineChart data={equityData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#263248" />
                     <XAxis dataKey="date" minTickGap={45} stroke="#8b97aa" />
-                    <YAxis stroke="#8b97aa" domain={[(dataMin: number) => Math.min(dataMin, 0.9), (dataMax: number) => Math.max(dataMax, 1.1)]} />
+                    <YAxis stroke="#8b97aa" />
                     <Tooltip contentStyle={{ background: "#111827", border: "1px solid #334155" }} />
                     <Legend />
                     <Line type="monotone" dataKey="benchmark" name="Benchmark" stroke="#94a3b8" dot={false} strokeDasharray="5 5" />
-                    <Line type="monotone" dataKey="strategy" name="AI 雙因子策略" stroke="#facc15" dot={false} strokeWidth={2} />
+                    <Line type="monotone" dataKey="strategy" name="LSTM 雙因子策略" stroke="#facc15" dot={false} strokeWidth={2} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartCard>
+
+              <ChartCard title="🤖 LSTM 預測報酬率">
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={predictionData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#263248" />
+                    <XAxis dataKey="date" minTickGap={45} stroke="#8b97aa" />
+                    <YAxis tickFormatter={(value) => `${value.toFixed(1)}%`} stroke="#8b97aa" />
+                    <Tooltip formatter={(value) => `${Number(value).toFixed(3)}%`} contentStyle={{ background: "#111827", border: "1px solid #334155" }} />
+                    <Line type="monotone" dataKey="predictedReturn" name="預測報酬率" stroke="#a78bfa" dot={false} strokeWidth={2} />
                   </LineChart>
                 </ResponsiveContainer>
               </ChartCard>
