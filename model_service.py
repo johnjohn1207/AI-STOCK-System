@@ -1,44 +1,40 @@
-"""Production LSTM training/inference helpers.
+"""Production LSTM inference helpers.
 
-Training is explicit; API inference only loads an existing artifact.
+The API only loads a published artifact. Training is handled by a separate job.
 """
 
 from __future__ import annotations
 
-import os
+import pickle
 from pathlib import Path
 
 import numpy as np
 import torch
-from sklearn.preprocessing import MinMaxScaler
 
 from model_core import LSTMModel
-from model_registry import ModelMetadata, get_active, save_artifact
+from model_registry import ModelMetadata, get_active
 
 FEATURES = ["Return", "Close", "Volume", "RSI"]
-LOOK_BACK = 60
 
 
 def _model_from_artifact(path: str | Path) -> LSTMModel:
-    model = LSTMModel(input_size=len(FEATURES), hidden_size=64, num_layers=2)
+    model = LSTMModel(input_size=4, hidden_size=50, num_layers=2, dropout=0.2)
     state = torch.load(path, map_location="cpu", weights_only=True)
     model.load_state_dict(state)
     model.eval()
     return model
 
 
-def predict_return(sequence: np.ndarray, metadata: ModelMetadata) -> float:
+def predict_returns(X: np.ndarray, metadata: ModelMetadata) -> np.ndarray:
     model = _model_from_artifact(metadata.artifact)
-    scaler = MinMaxScaler()
-    scaled = scaler.fit_transform(sequence.astype(np.float32))
-    x = torch.tensor(scaled[-metadata.look_back:], dtype=torch.float32).unsqueeze(0)
+    with open(metadata.scaler_artifact, "rb") as handle:
+        scaler = pickle.load(handle)
+    tensor = torch.from_numpy(X).float()
     with torch.inference_mode():
-        scaled_prediction = float(model(x).squeeze().item())
-    # The saved model predicts the scaled Return target. Inference uses the
-    # training-window scaler as a local approximation until a fitted scaler
-    # artifact is persisted alongside the model.
-    low, high = scaler.data_min_[0], scaler.data_max_[0]
-    return float(scaled_prediction * (high - low) + low)
+        scaled_predictions = model(tensor).cpu().numpy().reshape(-1)
+    return scaler.inverse_transform(
+        np.column_stack([scaled_predictions, np.zeros((len(scaled_predictions), len(FEATURES) - 1))])
+    )[:, 0]
 
 
 def active_model(ticker: str) -> ModelMetadata | None:
