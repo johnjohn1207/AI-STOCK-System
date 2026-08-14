@@ -11,10 +11,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, text
 
 import backtest_core
+import model_core
 
 load_dotenv()
 
-app = FastAPI(title="AI Stock System API", version="1.0.0")
+app = FastAPI(title="AI Stock System API", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,6 +33,7 @@ class BacktestRequest(BaseModel):
     initial_capital: float = Field(default=100000, ge=10000)
     stop_loss: float = Field(default=0.05, gt=0, le=0.2)
     take_profit: float = Field(default=0.15, gt=0, le=0.5)
+    train_epochs: int = Field(default=30, ge=1, le=200)
 
 
 def get_engine():
@@ -69,6 +71,52 @@ def fetch_market_data(request: BacktestRequest) -> pd.DataFrame:
         engine.dispose()
 
 
+def build_model_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Build exactly the four features expected by model_core.LSTMModel."""
+    result = df.copy()
+    result["Return"] = result["close_price"].pct_change()
+    result["MA20"] = result["close_price"].rolling(20).mean()
+    result["Vol_MA20"] = result["volume"].rolling(20).mean()
+    result["Factor_Pass"] = (
+        (result["close_price"] > result["MA20"])
+        & (result["volume"] > result["Vol_MA20"])
+    )
+
+    delta = result["close_price"].diff()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = -delta.clip(upper=0).rolling(14).mean()
+    rs = gain / loss.replace(0, np.nan)
+    result["RSI"] = (100 - (100 / (1 + rs))).fillna(50)
+    result = result.dropna(subset=["Return", "MA20", "Vol_MA20"]).reset_index(drop=True)
+    return result
+
+
+def generate_lstm_signals(df: pd.DataFrame, epochs: int) -> tuple[np.ndarray, np.ndarray]:
+    """Train the project's LSTM on the historical window and convert predictions to BUY signals."""
+    look_back = 60
+    if len(df) <= look_back + 10:
+        raise HTTPException(status_code=400, detail="資料不足：LSTM 至少需要 71 筆以上有效資料")
+
+    X, y, scaler, _ = model_core.prepare_model_data(df, look_back=look_back)
+    if len(X) < 10:
+        raise HTTPException(status_code=400, detail="有效訓練資料不足，無法建立 LSTM 訊號")
+
+    train_size = max(1, int(len(X) * 0.8))
+    model, device = model_core.train_lstm_model(
+        X[:train_size],
+        y[:train_size],
+        epochs=epochs,
+    )
+
+    predictions = model_core.predict_model(model, X, device).reshape(-1)
+    predicted_returns = model_core.get_inverse_price(predictions, scaler, feature_count=4)
+
+    # X[i] ends at df row i + look_back - 1, so the prediction is used on that day.
+    signal_series = np.zeros(len(df), dtype=bool)
+    signal_series[look_back:] = predicted_returns > 0
+    return signal_series, predicted_returns
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -79,27 +127,30 @@ def run_backtest(request: BacktestRequest) -> dict[str, Any]:
     if request.start_date > request.end_date:
         raise HTTPException(status_code=400, detail="開始日期不可晚於結束日期")
 
-    df = fetch_market_data(request)
-    if df.empty:
+    raw_df = fetch_market_data(request)
+    if raw_df.empty:
         raise HTTPException(status_code=404, detail="找不到指定股票與日期範圍的資料")
 
-    df["ma20"] = df["close_price"].rolling(window=20).mean().bfill()
-    volume_avg = df["volume"].rolling(20).mean()
-    df["factor_pass"] = (df["volume"] > volume_avg).fillna(False)
+    df = build_model_features(raw_df)
+    if len(df) <= 70:
+        raise HTTPException(status_code=400, detail="資料不足，請擴大回測日期範圍")
 
-    # 保留原 Streamlit 展示版的 AI 訊號行為；正式模型接入時可替換成 model_core.predict(df)。
-    rng = np.random.default_rng(42)
-    final_signals = rng.choice([True, False], size=len(df), p=[0.3, 0.7])
+    final_signals, predicted_returns = generate_lstm_signals(df, request.train_epochs)
+
+    # 雙因子：LSTM 看漲 + MA20/成交量動能濾網。
+    factor_pass = df["Factor_Pass"].to_numpy(dtype=bool)
+    final_signals &= factor_pass
 
     dates = df["trade_date"].tolist()
-    prices = df["close_price"].to_numpy()
+    prices = df["close_price"].to_numpy(dtype=float)
+    ma20 = df["MA20"].to_numpy(dtype=float)
 
     final_capital, equity_curve, trade_log, trade_profits = backtest_core.run_backtest(
         test_dates=dates,
         backtest_prices=prices,
         final_signals=final_signals,
-        ma20_data=df["ma20"].to_numpy(),
-        factor_pass_data=df["factor_pass"].to_numpy(),
+        ma20_data=ma20,
+        factor_pass_data=factor_pass,
         initial_capital=request.initial_capital,
         stop_loss_pct=request.stop_loss,
         take_profit_pct=request.take_profit,
@@ -119,11 +170,17 @@ def run_backtest(request: BacktestRequest) -> dict[str, Any]:
         for row in trade_log
     ]
 
+    prediction_dates = dates[60:]
     return {
         "ticker": request.ticker,
+        "model": "LSTM",
+        "lookBack": 60,
         "dates": [pd.Timestamp(d).strftime("%Y-%m-%d") for d in dates],
-        "prices": [float(x) for x in prices],
+        "prices": prices.tolist(),
         "equity_curve": [float(x) for x in equity_curve],
+        "signals": [bool(x) for x in final_signals],
+        "predicted_returns": [float(x) for x in predicted_returns],
+        "prediction_dates": [pd.Timestamp(d).strftime("%Y-%m-%d") for d in prediction_dates],
         "metrics": {
             "totalReturn": float(metrics["Total Return (%)"]),
             "winRate": float(metrics["Win Rate (%)"]),
