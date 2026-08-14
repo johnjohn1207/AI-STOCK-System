@@ -1,112 +1,107 @@
-# 📈 AI-Driven Quantitative Trading System (全端量化交易與回測系統)
+# 📈 AI-Driven Quantitative Trading System
 
 ![Python](https://img.shields.io/badge/Python-3.13-blue)
+![Next.js](https://img.shields.io/badge/Next.js-15-black)
+![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Advanced-blue)
-![Streamlit](https://img.shields.io/badge/Streamlit-UI-red)
 ![Status](https://img.shields.io/badge/Status-Active_Development-brightgreen)
 
-## 📝 專案簡介 (Project Overview)
-本專案為一個完整的**資料驅動 (Data-Driven) 量化交易系統**。打破傳統單純使用 Python 腳本跑回測的限制，本系統導入了**三層式架構 (Three-Tier Architecture)**，將前端視覺化、後端演算法與資料庫深度整合。系統涵蓋了自動化 ETL 資料清洗、LSTM 深度學習預測、技術指標多因子濾網，以及具備 ACID 交易保護的實盤模擬下單機制。
+## 📝 專案簡介
 
-本系統的設計初衷在於展現跨領域整合能力：**將財務金融的量化邏輯，透過嚴謹的軟體工程規範 (模組化、單元測試、防呆機制) 進行系統化實作。**
+這是一套資料驅動的全端量化交易與回測系統。前端已由 Streamlit 升級為 **Next.js + React**，Python 則透過 **FastAPI** 提供回測 API；核心策略與 PostgreSQL 資料層維持原有設計。
 
-## 🏗️ 系統架構與技術棧 (Architecture & Tech Stack)
+目前 Dashboard 保留原 Streamlit 版的主要功能：股票與日期範圍設定、初始本金、停損/停利、KPI、資金曲線、買賣點與交易日誌。
 
-### 🗺️ 系統架構圖 (System Architecture)
+## 🏗️ 新架構
 
 ```mermaid
 graph LR
-    %% 外部依賴
-    YF[Yahoo Finance API] -->|即時/歷史報價| ETL[data_loader.py <br> ETL & 增量更新]
-    
-    %% 資料庫中心
-    subgraph DB [PostgreSQL 核心資料庫]
-        MD[Market_Data <br> 乾淨數據與技術指標]
-        MS[Model_Signals <br> AI 預測與交易訊號]
-        TR[Transactions <br> 資金帳本與庫存]
-    end
-    
-    %% 資料流
-    ETL -->|寫入數據| MD
-    AI[model_core.py <br> LSTM 模型] -->|讀取特徵| MD
-    AI -->|寫入預測結果| MS
-    BT[backtest_core.py <br> 回測引擎] -->|撈取歷史訊號| MD
-    Daily[daily_trader.py <br> 自動下單排程] -->|讀取最新訊號| MS
-    Daily <-->|驗證餘額與扣款| TR
-    
-    %% 前端展示
-    UI[Streamlit app.py <br> 前端 UI] <-->|快取讀取與渲染| BT
-    
-    style Daily fill:#f9f,stroke:#333,stroke-width:2px
-    style DB fill:#e6f3ff,stroke:#333,stroke-width:2px
+    WEB[Next.js + React\nResponsive Dashboard] -->|POST /api/backtest| API[FastAPI\nPython API]
+    API --> BT[backtest_core.py\n回測引擎]
+    API --> DB[(PostgreSQL\nMarket_Data)]
+    ETL[data_loader.py] --> DB
+    MODEL[model_core.py\nLSTM] --> DB
+    TRADER[daily_trader.py] --> DB
 ```
 
-### ⚙️ 自動排程交易邏輯 (Trading Logic Flow)
+### 技術分層
 
-```mermaid
-graph TD
-    A[每日排程啟動 Daily Trader] --> B{檢查最新資料與模型訊號}
-    B -- 買進 (BUY) --> C[查詢 DB 可用資金餘額]
-    C --> D{餘額 > 股價？}
-    D -- 否 --> E[資金不足，警告並取消委託]
-    D -- 是 --> F[動態精算可買股數，執行 ExecuteTrade]
-    
-    B -- 賣出 (SELL) --> G[查詢 DB 目前庫存]
-    G --> H{庫存 > 0？}
-    H -- 否 --> I[無庫存，忽略賣出訊號]
-    H -- 是 --> J[全數出清，執行 ExecuteTrade]
-    
-    F --> K[紀錄 Transaction 並更新 Model_Signals]
-    J --> K
-    E --> K
-    I --> K
-```
+1. **Presentation Layer** — `frontend/`
+   - Next.js App Router、React、TypeScript、Recharts。
+   - RWD Dashboard，取代原本的 Streamlit UI。
+2. **API / Application Layer** — `api/main.py`
+   - FastAPI 接收回測參數、查詢 PostgreSQL、呼叫核心回測引擎並回傳 JSON。
+   - API 與前端分離，之後可直接接手機 App、其他 Web Client 或自動化服務。
+3. **Business Logic Layer** — `backtest_core.py`, `model_core.py`
+   - 保留既有 Python 回測與 AI 模型邏輯。
+4. **Data Layer** — PostgreSQL / SQLAlchemy / `data_loader.py`
+   - 歷史市場資料集中由 PostgreSQL 管理。
 
----
+## 🚀 快速啟動
 
-本系統嚴格遵守「關注點分離 (Separation of Concerns)」原則，分為三大層：
+### 1. Python API
 
-1. **展示層 (Presentation Layer)**: `Streamlit`, `Plotly`
-   - 提供 RWD 互動式網頁介面，支援動態資產曲線縮放與 AI 預測儀表板。
-2. **邏輯層 (Business Logic Layer)**: `PyTorch (LSTM)`, `Pandas`, `NumPy`
-   - 包含回測引擎 (`backtest_core.py`) 與 AI 模型特徵工程 (`model_core.py`)。
-   - 導入 **TDD (測試驅動開發)**，使用 `pytest` 確保核心財務指標(如最大回撤、夏普值)計算之絕對準確與極端值防護。
-3. **資料層 (Data Access Layer)**: `PostgreSQL`, `SQLAlchemy`, `yfinance`
-   - 捨棄 CSV，全面採用關聯式資料庫。實作 **Stored Procedures (預存程序)** 處理交易扣款，確保資金變動符合 ACID 特性，杜絕負庫存與超額買進。
-
-## ✨ 核心亮點功能 (Key Features)
-
-- **自動化 ETL 與抗錯機制**: `data_loader.py` 動態介接外部 API，自動對齊真實交易日，處理 Missing Data 並動態計算技術指標 (RSI, MA20)，直接餵入模型。
-- **雙因子進出場邏輯**: 結合 LSTM 明日漲跌預測與傳統技術指標濾網，建構高勝率的交易策略。
-- **動態資金與部位控管**: `daily_trader.py` 模擬實盤排程機器人，下單前自動向資料庫核實 `Users` 餘額與 `Transactions` 庫存，精算可購買股數。
-- **模組化與型別提示**: 核心程式碼全面導入 Python Type Hinting (`typing`) 與 Google Style Docstrings，具備極高的可讀性與擴充性。
-
-## 🚀 快速啟動 (Quick Start)
-
-### 1. 環境建置
-請確保本機端已安裝 PostgreSQL，並建立名為 `quant_db` 的資料庫。
 ```bash
-# 安裝依賴套件
 pip install -r requirements.txt
+uvicorn api.main:app --reload --port 8000
 ```
 
-### 2. 啟動前端展示介面 (Backtest UI)
+### 2. Next.js 前端
+
 ```bash
-streamlit run app.py
+cd frontend
+npm install
+npm run dev
 ```
 
-### 3. 執行單元測試 (Unit Testing)
+瀏覽器開啟 `http://localhost:3000`。
+
+若 FastAPI 不是跑在 `http://localhost:8000`，可設定：
+
+```bash
+# frontend/.env.local
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+### 3. PostgreSQL
+
+請確認 `.env` 已設定：
+
+```text
+DB_USER=...
+DB_PASSWORD=...
+DB_HOST=...
+DB_PORT=5432
+DB_NAME=quant_db
+```
+
+### 4. 單元測試
+
 ```bash
 pytest unit_test.py
 ```
 
-## 📂 專案結構 (Project Structure)
+## 📂 專案結構
+
 ```text
-├── app.py               # Streamlit 前端主程式
-├── data_loader.py       # ETL 與資料庫介接模組
-├── model_core.py        # 深度學習模型與特徵工程
-├── backtest_core.py     # 回測引擎與績效結算模組
-├── daily_trader.py      # 模擬實盤自動化下單腳本
-├── requirements.txt     # 專案依賴套件清單
-└── unit_test.py         # Pytest 單元測試腳本
+├── api/
+│   └── main.py            # FastAPI 回測 API
+├── frontend/
+│   ├── app/
+│   │   ├── page.tsx       # Next.js Dashboard
+│   │   ├── layout.tsx
+│   │   └── globals.css
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── next-env.d.ts
+├── data_loader.py         # ETL 與資料庫介接
+├── model_core.py          # LSTM 模型與特徵工程
+├── backtest_core.py       # 回測引擎與績效結算
+├── daily_trader.py        # 模擬實盤自動化下單
+├── requirements.txt       # Python API / ML 依賴
+└── unit_test.py            # Pytest 單元測試
 ```
+
+## ⚠️ AI 訊號說明
+
+目前 API 為了維持原 Streamlit Demo 的展示行為，使用固定 seed 的隨機訊號模擬 AI 預測；正式環境應將 `api/main.py` 中的 `final_signals` 替換為 `model_core` 的實際 LSTM 預測結果。這樣前端不需要再修改，只需替換後端模型來源即可。
