@@ -23,6 +23,7 @@ class ModelMetadata:
     trained_at: str
     epochs: int
     artifact: str
+    scaler_artifact: str
 
 
 def _load_registry() -> dict:
@@ -38,12 +39,14 @@ def _save_registry(registry: dict) -> None:
     tmp.replace(REGISTRY_FILE)
 
 
-def save_artifact(source: str | Path, ticker: str, look_back: int, features: list[str], epochs: int) -> ModelMetadata:
-    """Copy a trained state_dict to the registry and atomically publish metadata."""
+def save_artifacts(model_source: str | Path, scaler_source: str | Path, ticker: str, look_back: int, features: list[str], epochs: int) -> ModelMetadata:
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     version = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    target = MODEL_DIR / f"lstm_{ticker.replace('/', '_')}_{version}.pth"
-    shutil.copy2(source, target)
+    safe_ticker = ticker.replace("/", "_")
+    target = MODEL_DIR / f"lstm_{safe_ticker}_{version}.pth"
+    scaler_target = MODEL_DIR / f"lstm_{safe_ticker}_{version}.scaler.pkl"
+    shutil.copy2(model_source, target)
+    shutil.copy2(scaler_source, scaler_target)
     metadata = ModelMetadata(
         model_name="lstm",
         version=version,
@@ -53,6 +56,7 @@ def save_artifact(source: str | Path, ticker: str, look_back: int, features: lis
         trained_at=datetime.now(timezone.utc).isoformat(),
         epochs=epochs,
         artifact=str(target),
+        scaler_artifact=str(scaler_target),
     )
     registry = _load_registry()
     registry.setdefault("models", []).append(asdict(metadata))
