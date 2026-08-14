@@ -15,7 +15,7 @@ import model_service
 
 load_dotenv()
 
-app = FastAPI(title="AI Stock System API", version="2.0.0")
+app = FastAPI(title="AI Stock System API", version="2.0.1")
 
 configured_origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "*").split(",") if origin.strip()]
 app.add_middleware(
@@ -49,13 +49,7 @@ def get_engine():
     if not all(values):
         raise HTTPException(status_code=500, detail="Database environment variables are incomplete")
     user, password, host, port, name = values
-    return create_engine(
-        f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{name}",
-        pool_pre_ping=True,
-        pool_recycle=1800,
-        pool_size=3,
-        max_overflow=2,
-    )
+    return create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{name}", pool_pre_ping=True, pool_recycle=1800, pool_size=3, max_overflow=2)
 
 
 def fetch_market_data(request: BacktestRequest) -> pd.DataFrame:
@@ -91,24 +85,18 @@ def build_model_features(df: pd.DataFrame) -> pd.DataFrame:
     return result.dropna(subset=["Return", "MA20", "Vol_MA20"]).reset_index(drop=True)
 
 
-def generate_lstm_signals(df: pd.DataFrame, ticker: str) -> tuple[np.ndarray, np.ndarray, int]:
+def generate_lstm_signals(df: pd.DataFrame, ticker: str) -> tuple[np.ndarray, np.ndarray, int, str]:
     metadata = model_service.active_model(ticker)
     if metadata is None:
-        raise HTTPException(
-            status_code=503,
-            detail=f"尚未發布 {ticker} 的 LSTM 模型。請先執行 scripts/train_lstm.py。",
-        )
-    if len(df) <= metadata.look_back + 10:
+        raise HTTPException(status_code=503, detail=f"尚未發布 {ticker} 的 LSTM 模型。請先執行 scripts/train_lstm.py。")
+    X = model_service.make_sequences(df, metadata)
+    if len(X) == 0:
         raise HTTPException(status_code=400, detail="資料不足：LSTM 至少需要足夠的 look-back 歷史資料")
 
-    features = df[metadata.features].to_numpy(dtype=np.float32)
-    from model_core import prepare_model_data
-
-    X, _, _, _ = prepare_model_data(df, look_back=metadata.look_back)
     predictions = model_service.predict_returns(X, metadata)
     signal_series = np.zeros(len(df), dtype=bool)
     signal_series[metadata.look_back:] = predictions > 0
-    return signal_series, predictions, metadata.look_back
+    return signal_series, predictions, metadata.look_back, metadata.version
 
 
 @app.get("/health")
@@ -150,7 +138,7 @@ def run_backtest(request: BacktestRequest) -> dict[str, Any]:
     if len(df) <= 70:
         raise HTTPException(status_code=400, detail="資料不足，請擴大回測日期範圍")
 
-    final_signals, predicted_returns, look_back = generate_lstm_signals(df, request.ticker)
+    final_signals, predicted_returns, look_back, model_version = generate_lstm_signals(df, request.ticker)
     factor_pass = df["Factor_Pass"].to_numpy(dtype=bool)
     final_signals &= factor_pass
 
@@ -175,12 +163,11 @@ def run_backtest(request: BacktestRequest) -> dict[str, Any]:
         for row in trade_log
     ]
     prediction_dates = dates[look_back:]
-    metadata = model_service.active_model(request.ticker)
 
     return {
         "ticker": request.ticker,
-        "model": metadata.model_name if metadata else "LSTM",
-        "modelVersion": metadata.version if metadata else None,
+        "model": "LSTM",
+        "modelVersion": model_version,
         "lookBack": look_back,
         "dates": [pd.Timestamp(d).strftime("%Y-%m-%d") for d in dates],
         "prices": prices.tolist(),
