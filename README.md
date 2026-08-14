@@ -4,50 +4,103 @@
 ![Next.js](https://img.shields.io/badge/Next.js-15-black)
 ![FastAPI](https://img.shields.io/badge/FastAPI-API-009688)
 ![PyTorch](https://img.shields.io/badge/PyTorch-LSTM-ee4c2c)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Advanced-blue)
-![Status](https://img.shields.io/badge/Status-Active_Development-brightgreen)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Supabase-blue)
 
-## 📝 專案簡介
+全端量化交易與 AI 回測系統：**Next.js + FastAPI + PyTorch LSTM + PostgreSQL**。
 
-這是一套資料驅動的全端量化交易與回測系統。前端已由 Streamlit 升級為 **Next.js + React**，Python 則透過 **FastAPI** 提供回測 API；核心策略、PyTorch LSTM 與 PostgreSQL 資料層維持原有設計。
-
-Dashboard 支援股票與日期範圍、初始本金、停損/停利、LSTM 訓練 Epoch、KPI、資金曲線、LSTM 預測報酬率、買賣點與交易日誌。
-
-## 🏗️ 新架構
+## 🏗️ 架構
 
 ```mermaid
 graph LR
-    WEB[Next.js + React\nResponsive Dashboard] -->|POST /api/backtest| API[FastAPI\nPython API]
-    API --> MODEL[model_core.py\nPyTorch LSTM]
-    MODEL --> BT[backtest_core.py\n回測引擎]
-    API --> DB[(PostgreSQL\nMarket_Data)]
-    ETL[data_loader.py] --> DB
-    TRADER[daily_trader.py] --> DB
+    WEB[Next.js / Vercel] -->|HTTPS| API[FastAPI + PyTorch / Railway]
+    API --> DB[(PostgreSQL / Supabase)]
+    API --> YF[yfinance / Yahoo Finance]
 ```
 
-### 技術分層
+## 🚀 雲端部署：Vercel + Railway + Supabase
 
-1. **Presentation Layer** — `frontend/`
-   - Next.js App Router、React、TypeScript、Recharts。
-   - RWD Dashboard，取代原本的 Streamlit UI。
-2. **API / Application Layer** — `api/main.py`
-   - FastAPI 接收回測參數、查詢 PostgreSQL、建立模型特徵、訓練 LSTM、產生訊號，再呼叫核心回測引擎。
-3. **Business Logic Layer** — `backtest_core.py`, `model_core.py`
-   - `model_core.py` 使用 60 日 look-back，輸入 Return / Close / Volume / RSI，透過 PyTorch LSTM 預測下一期 Return。
-   - LSTM 看漲預測再搭配 MA20 + 成交量因子作為雙因子進場條件。
-4. **Data Layer** — PostgreSQL / SQLAlchemy / `data_loader.py`
-   - 歷史市場資料集中由 PostgreSQL 管理。
+### 1. Supabase PostgreSQL
 
-## 🚀 快速啟動
+在 Supabase 建立 project，取得 PostgreSQL connection information。
 
-### 1. Python API
+把以下變數放到 Railway service：
+
+```text
+DB_USER=postgres
+DB_PASSWORD=<Supabase DB password>
+DB_HOST=<Supabase host>
+DB_PORT=5432
+DB_NAME=postgres
+```
+
+請先在 Supabase 執行專案原本的 SQL schema / migration，確認 `Securities` 與 `market_data` 已建立。
+
+### 2. Railway API
+
+將 GitHub repository 連到 Railway，服務 Root Directory 保持 repository root，Railway 會依 `Dockerfile` 建置 FastAPI。
+
+需要設定：
+
+```text
+DB_USER
+DB_PASSWORD
+DB_HOST
+DB_PORT
+DB_NAME
+```
+
+Railway 會自動提供 `PORT`，不要把 `PORT` 寫死。
+
+部署後確認：
+
+```text
+https://<your-railway-domain>/health
+```
+
+應回傳：
+
+```json
+{"status":"ok"}
+```
+
+### 3. Vercel Next.js
+
+在 Vercel Import Git Repository，選擇 `frontend` 作為 **Root Directory**。
+
+Build command：
+
+```text
+npm run build
+```
+
+Install command：
+
+```text
+npm install
+```
+
+設定環境變數：
+
+```text
+NEXT_PUBLIC_API_URL=https://<your-railway-domain>
+```
+
+部署完成後，Vercel 會提供前端網址。
+
+### 4. Railway CORS
+
+目前 FastAPI API 開放跨來源 request，方便 Vercel 與 Railway 分離部署。正式環境建議將 `api/main.py` 的 `allow_origins` 收窄為你的 Vercel domain。
+
+## 🧪 本機執行
+
+### API
 
 ```bash
 pip install -r requirements.txt
 uvicorn api.main:app --reload --port 8000
 ```
 
-### 2. Next.js 前端
+### Frontend
 
 ```bash
 cd frontend
@@ -55,63 +108,18 @@ npm install
 npm run dev
 ```
 
-瀏覽器開啟 `http://localhost:3000`。
+建立 `frontend/.env.local`：
 
-若 FastAPI 不是跑在 `http://localhost:8000`，可設定：
-
-```bash
-# frontend/.env.local
+```text
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-### 3. PostgreSQL
+## 🤖 LSTM
 
-請確認 `.env` 已設定：
+API 使用專案既有 `model_core.py` 的 PyTorch LSTM，60 日 look-back，使用 Return / Close / Volume / RSI 特徵預測報酬率，再與 MA20 + 成交量因子組成進場訊號。
 
-```text
-DB_USER=...
-DB_PASSWORD=...
-DB_HOST=...
-DB_PORT=5432
-DB_NAME=quant_db
-```
+目前每次回測都會重新訓練模型。正式上線後建議把 training job 與 inference service 分離，保存 `.pth` 權重，降低 API response time。
 
-### 4. 單元測試
+## 🔐 Secrets
 
-```bash
-pytest unit_test.py
-```
-
-## 📂 專案結構
-
-```text
-├── api/
-│   └── main.py            # FastAPI 回測 API
-├── frontend/
-│   ├── app/
-│   │   ├── page.tsx       # Next.js Dashboard
-│   │   ├── layout.tsx
-│   │   └── globals.css
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── next-env.d.ts
-├── data_loader.py         # ETL 與資料庫介接
-├── model_core.py          # PyTorch LSTM 模型與特徵工程
-├── backtest_core.py       # 回測引擎與績效結算
-├── daily_trader.py        # 模擬實盤自動化下單
-├── requirements.txt       # Python API / ML 依賴
-└── unit_test.py            # Pytest 單元測試
-```
-
-## 🤖 LSTM 訊號流程
-
-1. 從 PostgreSQL 取得指定股票歷史資料。
-2. 計算 Return、MA20、成交量均線與 RSI。
-3. 使用前 80% 序列 fit MinMaxScaler，避免資料洩漏。
-4. 使用 60 個交易日建立 LSTM sequence。
-5. 以訓練資料訓練 PyTorch LSTM。
-6. 產生預測 Return；預測 Return > 0 視為 AI 看漲。
-7. 再通過 `Close > MA20` 且 `Volume > Volume MA20` 的多因子濾網。
-8. 將最終訊號交給 `backtest_core.py` 執行回測。
-
-> 注意：目前 API 每次回測都會重新訓練模型。這適合展示與研究；正式部署建議把模型訓練與 API inference 分離，將訓練好的權重保存後直接載入推論。
+不要把 `.env`、Supabase password、Railway token、Vercel token 或模型私鑰提交到 Git。Repository 提供 `.env.example` 作為設定模板。
