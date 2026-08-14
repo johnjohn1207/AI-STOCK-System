@@ -17,10 +17,7 @@ load_dotenv()
 
 app = FastAPI(title="AI Stock System API", version="1.2.0")
 
-# Railway/Vercel are separate origins in production. Set CORS_ORIGINS to a
-# comma-separated list, e.g. https://ai-stock-system.vercel.app,http://localhost:3000.
 configured_origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "*").split(",") if origin.strip()]
-allow_all_origins = configured_origins == ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=configured_origins,
@@ -43,7 +40,6 @@ class BacktestRequest(BaseModel):
 def get_engine():
     database_url = os.getenv("DATABASE_URL")
     if database_url:
-        # Supabase commonly supplies postgres:// or postgresql:// URLs.
         if database_url.startswith("postgres://"):
             database_url = "postgresql+psycopg2://" + database_url[len("postgres://"):]
         elif database_url.startswith("postgresql://"):
