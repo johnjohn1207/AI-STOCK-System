@@ -1,2 +1,9 @@
 .env
+.env.*
+!.env.example
 __pycache__/
+*.pyc
+models/
+.pytest_cache/
+.venv/
+venv/
